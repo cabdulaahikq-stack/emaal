@@ -37,7 +37,7 @@ interface PostLedgerOptions {
  * updates both wallets' cached balances. Locks wallets in a stable id order so
  * two concurrent transfers moving money in opposite directions can't deadlock.
  */
-async function postLedgerPair(
+export async function postLedgerPair(
   tx: Tx,
   transactionId: string,
   debitWalletId: string,
@@ -76,8 +76,12 @@ async function postLedgerPair(
   });
 }
 
-/** Reserves funds against a wallet's spendable (balance - held) amount while a large debit awaits admin approval. */
-async function reserveHold(tx: Tx, walletId: string, amountMinor: bigint): Promise<void> {
+/**
+ * Reserves funds against a wallet's spendable (balance - held) amount while a
+ * debit awaits a decision — a large transaction awaiting admin approval, or a
+ * wholesale marketplace order awaiting the merchant's accept/reject.
+ */
+export async function reserveHold(tx: Tx, walletId: string, amountMinor: bigint): Promise<void> {
   const row = await lockWallet(tx, walletId);
   if (row.status !== "ACTIVE") throw new ConflictError("Wallet is not active");
   const spendable = row.balanceMinor - row.heldMinor;
@@ -85,8 +89,8 @@ async function reserveHold(tx: Tx, walletId: string, amountMinor: bigint): Promi
   await tx.wallet.update({ where: { id: walletId }, data: { heldMinor: row.heldMinor + amountMinor } });
 }
 
-/** Releases a previously reserved hold without moving any balance (used when an admin rejects the transaction). */
-async function releaseHoldOnly(tx: Tx, walletId: string, amountMinor: bigint): Promise<void> {
+/** Releases a previously reserved hold without moving any balance (used when a pending decision is rejected). */
+export async function releaseHoldOnly(tx: Tx, walletId: string, amountMinor: bigint): Promise<void> {
   const row = await lockWallet(tx, walletId);
   await tx.wallet.update({ where: { id: walletId }, data: { heldMinor: row.heldMinor - amountMinor } });
 }

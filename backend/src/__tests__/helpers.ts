@@ -14,6 +14,15 @@ export async function resetDb(): Promise<void> {
     prisma.apiRequestLog.deleteMany(),
     prisma.apiKey.deleteMany(),
     prisma.approvalRequest.deleteMany(),
+    prisma.saleItem.deleteMany(),
+    prisma.sale.deleteMany(),
+    prisma.paymentRequest.deleteMany(),
+    prisma.stockIntake.deleteMany(),
+    prisma.productVariant.deleteMany(),
+    prisma.product.deleteMany(),
+    prisma.warehouse.deleteMany(),
+    prisma.staffMember.deleteMany(),
+    prisma.merchantProfile.deleteMany(),
     prisma.ledgerEntry.deleteMany(),
     prisma.transaction.deleteMany(),
     prisma.apiPartner.deleteMany(),
@@ -59,6 +68,29 @@ export async function createAdmin(): Promise<{ token: string; userId: string }> 
   const res = await request(app).post("/auth/login").send({ phone, password: "adminpass123" });
   if (res.status !== 200) throw new Error(`admin login failed: ${JSON.stringify(res.body)}`);
   return { token: res.body.token, userId: admin.id };
+}
+
+interface Merchant {
+  token: string;
+  phone: string;
+  pin: string;
+  userId: string;
+}
+
+export async function createMerchant(overrides?: Partial<{ shopName: string; phone: string; pin: string }>): Promise<Merchant> {
+  const phone = overrides?.phone ?? `+2526${Math.floor(10000000 + Math.random() * 89999999)}`;
+  const pin = overrides?.pin ?? "1234";
+  const res = await request(app)
+    .post("/auth/merchant-signup")
+    .send({
+      fullName: "Test Merchant",
+      phone,
+      password: "password123",
+      pin,
+      shopName: overrides?.shopName ?? "Test Shop",
+    });
+  if (res.status !== 201) throw new Error(`merchant signup failed: ${JSON.stringify(res.body)}`);
+  return { token: res.body.token, phone, pin, userId: res.body.user.id };
 }
 
 export function uuid(): string {

@@ -7,6 +7,8 @@ import { walletRouter } from "./routes/wallet.js";
 import { adminRouter } from "./routes/admin.js";
 import { adminPartnersRouter } from "./routes/adminPartners.js";
 import { partnerApiRouter } from "./routes/partnerApi.js";
+import { merchantRouter } from "./routes/merchant.js";
+import { marketplaceRouter } from "./routes/marketplace.js";
 import { authRateLimiter } from "./middleware/rateLimit.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { apiDocsMarkdown } from "./docs.js";
@@ -29,6 +31,8 @@ export function createApp(): Express {
   app.use("/wallet", walletRouter);
   app.use("/admin/partners", adminPartnersRouter);
   app.use("/admin", adminRouter);
+  app.use("/merchant", merchantRouter);
+  app.use("/marketplace", marketplaceRouter);
   app.use("/v1", partnerApiRouter);
 
   app.use(notFoundHandler);

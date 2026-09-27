@@ -23,6 +23,18 @@ authRouter.post("/signup", async (req, res, next) => {
   }
 });
 
+const merchantSignupSchema = signupSchema.extend({ shopName: z.string().min(2).max(120) });
+
+authRouter.post("/merchant-signup", async (req, res, next) => {
+  try {
+    const input = merchantSignupSchema.parse(req.body);
+    const { user, token } = await authService.merchantSignup(input);
+    res.status(201).json({ token, user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const loginSchema = z.object({
   phone: z.string().min(1),
   password: z.string().min(1),

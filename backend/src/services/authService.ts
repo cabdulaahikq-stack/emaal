@@ -2,7 +2,9 @@ import { prisma } from "../lib/db.js";
 import { hashSecret, verifySecret, signSession } from "../lib/security.js";
 import { AuthError, ConflictError, ValidationError } from "../lib/errors.js";
 import { recordAudit } from "../lib/audit.js";
-import type { User } from "@prisma/client";
+import type { Prisma, User, UserRole } from "@prisma/client";
+
+type Db = Prisma.TransactionClient | typeof prisma;
 
 const PIN_MAX_ATTEMPTS = 5;
 const PIN_LOCKOUT_MS = 15 * 60 * 1000;
@@ -20,34 +22,54 @@ function assertPinShape(pin: string): void {
   }
 }
 
-export async function signup(input: SignupInput): Promise<{ user: User; token: string }> {
+/** Shared by every self-serve signup flow (customer, merchant): validates, hashes, and creates the User + Wallet. */
+async function createAccountWithWallet(db: Db, role: UserRole, input: SignupInput): Promise<User> {
   assertPinShape(input.pin);
   if (input.password.length < 8) {
     throw new ValidationError("Password must be at least 8 characters");
   }
-  const existing = await prisma.user.findUnique({ where: { phone: input.phone } });
+  const existing = await db.user.findUnique({ where: { phone: input.phone } });
   if (existing) {
     throw new ConflictError("An account with this phone number already exists");
   }
 
   const [passwordHash, pinHash] = await Promise.all([hashSecret(input.password), hashSecret(input.pin)]);
 
+  return db.user.create({
+    data: {
+      role,
+      fullName: input.fullName.trim(),
+      phone: input.phone,
+      passwordHash,
+      pinHash,
+      wallet: { create: { balanceMinor: 0n, currency: "USD" } },
+    },
+  });
+}
+
+export async function signup(input: SignupInput): Promise<{ user: User; token: string }> {
+  const user = await createAccountWithWallet(prisma, "CUSTOMER", input);
+  await recordAudit({ actorId: user.id, action: "user.signup", targetType: "User", targetId: user.id });
+  return { user, token: signSession({ sub: user.id, role: user.role }) };
+}
+
+export interface MerchantSignupInput extends SignupInput {
+  shopName: string;
+}
+
+/** Self-serve merchant signup: a MERCHANT-role User with its own wallet, plus a MerchantProfile shell for staff/products/warehouses. */
+export async function merchantSignup(input: MerchantSignupInput): Promise<{ user: User; token: string }> {
+  if (input.shopName.trim().length < 2) {
+    throw new ValidationError("Shop name must be at least 2 characters");
+  }
+
   const user = await prisma.$transaction(async (tx) => {
-    const created = await tx.user.create({
-      data: {
-        role: "CUSTOMER",
-        fullName: input.fullName.trim(),
-        phone: input.phone,
-        passwordHash,
-        pinHash,
-        wallet: { create: { balanceMinor: 0n, currency: "USD" } },
-      },
-    });
+    const created = await createAccountWithWallet(tx, "MERCHANT", input);
+    await tx.merchantProfile.create({ data: { userId: created.id, shopName: input.shopName.trim() } });
     return created;
   });
 
-  await recordAudit({ actorId: user.id, action: "user.signup", targetType: "User", targetId: user.id });
-
+  await recordAudit({ actorId: user.id, action: "merchant.signup", targetType: "User", targetId: user.id, metadata: { shopName: input.shopName } });
   return { user, token: signSession({ sub: user.id, role: user.role }) };
 }
 

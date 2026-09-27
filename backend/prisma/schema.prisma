@@ -18,6 +18,12 @@ enum UserRole {
   // counterparty for deposits/withdrawals (i.e. the "float" — cash that has
   // physically moved in/out of the platform through an external rail).
   SYSTEM
+  // Owns a shop in the marketplace: manages staff, products, warehouses,
+  // and decides wholesale orders.
+  MERCHANT
+  // Works for exactly one merchant under its own login (never a shared PIN)
+  // so every cash-handling action is attributable to a real account.
+  STAFF
 }
 
 enum UserStatus {
@@ -26,21 +32,25 @@ enum UserStatus {
 }
 
 model User {
-  id           String     @id @default(uuid())
-  role         UserRole
-  status       UserStatus @default(ACTIVE)
-  fullName     String
-  phone        String     @unique
-  passwordHash String
-  pinHash      String
-  pinFailCount Int        @default(0)
+  id             String     @id @default(uuid())
+  role           UserRole
+  status         UserStatus @default(ACTIVE)
+  fullName       String
+  phone          String     @unique
+  passwordHash   String
+  pinHash        String
+  pinFailCount   Int        @default(0)
   pinLockedUntil DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
-  wallet       Wallet?
-  approvalsDecided ApprovalRequest[] @relation("ApprovalDecidedBy")
-  auditLogs    AuditLog[]
+  wallet              Wallet?
+  approvalsDecided    ApprovalRequest[] @relation("ApprovalDecidedBy")
+  auditLogs           AuditLog[]
+  merchantProfile     MerchantProfile?
+  staffMember         StaffMember?
+  purchases           Sale[]            @relation("SaleCustomer")
+  paymentRequestsMade PaymentRequest[]  @relation("PaymentRequester")
 
   @@index([phone])
 }
@@ -56,22 +66,22 @@ enum WalletStatus {
 }
 
 model Wallet {
-  id            String       @id @default(uuid())
-  user          User         @relation(fields: [userId], references: [id])
-  userId        String       @unique
-  status        WalletStatus @default(ACTIVE)
+  id           String       @id @default(uuid())
+  user         User         @relation(fields: [userId], references: [id])
+  userId       String       @unique
+  status       WalletStatus @default(ACTIVE)
   // Cached balance in minor units (cents). The source of truth is the sum of
   // posted LedgerEntry.amountMinor for this wallet, recomputed inside every
   // mutating transaction — this column is a read-optimization, never written
   // to outside walletService.
-  balanceMinor  BigInt       @default(0)
+  balanceMinor BigInt       @default(0)
   // Reserved out of balanceMinor by a WITHDRAWAL/TRANSFER sitting in the
   // manual approval queue, so the same funds can't be spent twice while a
   // decision is pending. Spendable balance is always balanceMinor - heldMinor.
-  heldMinor     BigInt       @default(0)
-  currency      String       @default("USD")
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  heldMinor    BigInt       @default(0)
+  currency     String       @default("USD")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   ledgerEntries LedgerEntry[]
 
@@ -98,25 +108,27 @@ enum TransactionStatus {
 // one debit and one matching credit, so the ledger always nets to zero and a
 // wallet's balance is independently re-derivable by summing its entries.
 model Transaction {
-  id             String             @id @default(uuid())
-  type           TransactionType
-  status         TransactionStatus  @default(PENDING)
-  amountMinor    BigInt
-  currency       String             @default("USD")
+  id               String            @id @default(uuid())
+  type             TransactionType
+  status           TransactionStatus @default(PENDING)
+  amountMinor      BigInt
+  currency         String            @default("USD")
   // Client-supplied idempotency key, scoped per source (customer app or partner API key).
-  idempotencyKey String
+  idempotencyKey   String
   idempotencyScope String
-  sourceWalletId String?
-  destWalletId   String?
-  partnerId      String?
-  partner        ApiPartner?        @relation(fields: [partnerId], references: [id])
-  failureReason  String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  sourceWalletId   String?
+  destWalletId     String?
+  partnerId        String?
+  partner          ApiPartner?       @relation(fields: [partnerId], references: [id])
+  failureReason    String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  ledgerEntries  LedgerEntry[]
-  approvalRequest ApprovalRequest?
+  ledgerEntries     LedgerEntry[]
+  approvalRequest   ApprovalRequest?
   webhookDeliveries WebhookDelivery[]
+  sale              Sale?
+  paymentRequest    PaymentRequest?
 
   @@unique([idempotencyScope, idempotencyKey])
   @@index([status])
@@ -130,16 +142,16 @@ enum LedgerDirection {
 }
 
 model LedgerEntry {
-  id            String          @id @default(uuid())
-  wallet        Wallet          @relation(fields: [walletId], references: [id])
-  walletId      String
-  transaction   Transaction     @relation(fields: [transactionId], references: [id])
-  transactionId String
-  direction     LedgerDirection
+  id                String          @id @default(uuid())
+  wallet            Wallet          @relation(fields: [walletId], references: [id])
+  walletId          String
+  transaction       Transaction     @relation(fields: [transactionId], references: [id])
+  transactionId     String
+  direction         LedgerDirection
   // Always stored positive; direction determines the sign applied to balance.
-  amountMinor   BigInt
+  amountMinor       BigInt
   balanceAfterMinor BigInt
-  createdAt     DateTime        @default(now())
+  createdAt         DateTime        @default(now())
 
   @@index([walletId, createdAt])
 }
@@ -155,16 +167,16 @@ enum ApprovalDecision {
 }
 
 model ApprovalRequest {
-  id            String            @id @default(uuid())
-  transaction   Transaction       @relation(fields: [transactionId], references: [id])
-  transactionId String            @unique
+  id            String           @id @default(uuid())
+  transaction   Transaction      @relation(fields: [transactionId], references: [id])
+  transactionId String           @unique
   reason        String
-  decision      ApprovalDecision  @default(PENDING)
-  decidedBy     User?             @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
+  decision      ApprovalDecision @default(PENDING)
+  decidedBy     User?            @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
   decidedById   String?
   decidedAt     DateTime?
   notes         String?
-  createdAt     DateTime          @default(now())
+  createdAt     DateTime         @default(now())
 
   @@index([decision])
 }
@@ -180,47 +192,47 @@ enum PartnerStatus {
 }
 
 model ApiPartner {
-  id          String        @id @default(uuid())
-  name        String
-  status      PartnerStatus @default(ACTIVE)
-  webhookUrl  String?
-  webhookSecret String?
-  rateLimitPerMinute Int    @default(120)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                 String        @id @default(uuid())
+  name               String
+  status             PartnerStatus @default(ACTIVE)
+  webhookUrl         String?
+  webhookSecret      String?
+  rateLimitPerMinute Int           @default(120)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  apiKeys     ApiKey[]
+  apiKeys      ApiKey[]
   transactions Transaction[]
-  requestLogs ApiRequestLog[]
+  requestLogs  ApiRequestLog[]
 
   @@index([status])
 }
 
 model ApiKey {
-  id          String    @id @default(uuid())
-  partner     ApiPartner @relation(fields: [partnerId], references: [id])
-  partnerId   String
+  id         String     @id @default(uuid())
+  partner    ApiPartner @relation(fields: [partnerId], references: [id])
+  partnerId  String
   // Shown once at creation; only the hash is persisted.
-  keyPrefix   String
-  keyHash     String
-  scopes      String[]
-  revokedAt   DateTime?
-  lastUsedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  keyPrefix  String
+  keyHash    String
+  scopes     String[]
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime   @default(now())
 
   @@index([keyPrefix])
   @@index([partnerId])
 }
 
 model ApiRequestLog {
-  id          String     @id @default(uuid())
-  partner     ApiPartner @relation(fields: [partnerId], references: [id])
-  partnerId   String
-  method      String
-  path        String
-  statusCode  Int
-  ipAddress   String?
-  createdAt   DateTime   @default(now())
+  id         String     @id @default(uuid())
+  partner    ApiPartner @relation(fields: [partnerId], references: [id])
+  partnerId  String
+  method     String
+  path       String
+  statusCode Int
+  ipAddress  String?
+  createdAt  DateTime   @default(now())
 
   @@index([partnerId, createdAt])
 }
@@ -232,18 +244,253 @@ enum WebhookDeliveryStatus {
 }
 
 model WebhookDelivery {
-  id            String                 @id @default(uuid())
-  transaction   Transaction            @relation(fields: [transactionId], references: [id])
+  id            String                @id @default(uuid())
+  transaction   Transaction           @relation(fields: [transactionId], references: [id])
   transactionId String
   partnerId     String
   url           String
-  status        WebhookDeliveryStatus  @default(PENDING)
-  attempts      Int                    @default(0)
+  status        WebhookDeliveryStatus @default(PENDING)
+  attempts      Int                   @default(0)
   lastError     String?
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Marketplace: merchants, staff, inventory, sales
+// ---------------------------------------------------------------------------
+
+// One MERCHANT-role User runs one shop. Its wallet (via User.wallet) is the
+// business's own balance — customer wallet-tendered sales credit it, and the
+// merchant withdraws/pays out from it like any other wallet.
+model MerchantProfile {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @unique
+  shopName  String
+  createdAt DateTime @default(now())
+
+  staff      StaffMember[]
+  products   Product[]
+  warehouses Warehouse[]
+  sales      Sale[]
+}
+
+enum StaffStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+}
+
+// Staff always log in with their own phone + password + PIN (a STAFF-role
+// User, created by their merchant) — never a shared PIN with name-picking —
+// so every cash-handling or stock action is attributable to a real account.
+model StaffMember {
+  id             String          @id @default(uuid())
+  merchant       MerchantProfile @relation(fields: [merchantId], references: [id])
+  merchantId     String
+  user           User            @relation(fields: [userId], references: [id])
+  userId         String          @unique
+  jobTitle       String
+  status         StaffStatus     @default(ACTIVE)
+  canTakeOrders  Boolean         @default(false)
+  canSell        Boolean         @default(false)
+  canCollectCash Boolean         @default(false)
+  canPayoutCash  Boolean         @default(false)
+  // Merchant grants this per staff member, separately from the four above —
+  // it lets them log received stock against the shop's own warehouses.
+  canIntakeStock Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  warehousesManaged Warehouse[]
+  stockIntakes      StockIntake[]
+  sales             Sale[]
+
+  @@index([merchantId])
+}
+
+model Warehouse {
+  id            String          @id @default(uuid())
+  merchant      MerchantProfile @relation(fields: [merchantId], references: [id])
+  merchantId    String
+  name          String
+  location      String
+  responsible   StaffMember?    @relation(fields: [responsibleId], references: [id])
+  responsibleId String?
+  lastCountedAt DateTime?
+  createdAt     DateTime        @default(now())
+
+  variants ProductVariant[]
+
+  @@index([merchantId])
+}
+
+enum ProductCategory {
+  SHOES
+  CLOTHING
+  OTHER
+}
+
+model Product {
+  id                  String          @id @default(uuid())
+  merchant            MerchantProfile @relation(fields: [merchantId], references: [id])
+  merchantId          String
+  name                String
+  category            ProductCategory @default(OTHER)
+  barcode             String?
+  // Opaque random token encoded into the product's QR code (scan-to-view).
+  qrToken             String          @unique @default(uuid())
+  images              String[]
+  description         String?
+  costPriceMinor      BigInt
+  wholesalePriceMinor BigInt
+  retailPriceMinor    BigInt
+  discountPercent     Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  variants     ProductVariant[]
+  stockIntakes StockIntake[]
+  saleItems    SaleItem[]
+
+  @@unique([merchantId, barcode])
+  @@index([merchantId])
+}
+
+// A product with no size (category OTHER, typically) has exactly one variant
+// with sizeLabel = null. Shoes/clothing have one row per size.
+model ProductVariant {
+  id          String    @id @default(uuid())
+  product     Product   @relation(fields: [productId], references: [id])
+  productId   String
+  sizeLabel   String?
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  warehouseId String
+  // Physical count on the shelf.
+  stockQty    Int       @default(0)
+  // Held by PENDING wholesale sales so the same units can't be sold twice
+  // while a merchant decision is outstanding. Sellable = stockQty - reservedQty.
+  reservedQty Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  stockIntakes StockIntake[]
+  saleItems    SaleItem[]
+
+  @@unique([productId, sizeLabel])
+  @@index([warehouseId])
+}
+
+// One row per stock-in event ("liiska soo-iibsiyada" — the purchase/intake
+// log), recorded at the cost price paid at that time.
+model StockIntake {
+  id             String         @id @default(uuid())
+  product        Product        @relation(fields: [productId], references: [id])
+  productId      String
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  variantId      String
+  quantity       Int
+  costPriceMinor BigInt
+  recordedBy     StaffMember?   @relation(fields: [recordedById], references: [id])
+  recordedById   String?
+  createdAt      DateTime       @default(now())
+
+  @@index([productId, createdAt])
+}
+
+enum SaleKind {
+  RETAIL
+  WHOLESALE
+}
+
+enum SaleStatus {
+  // Wholesale only: awaiting the merchant's accept/reject.
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+enum SaleTender {
+  WALLET
+  CASH
+}
+
+// Any marketplace transaction that moves goods: a customer's retail or
+// wholesale purchase through the app, or a staff POS sale. Retail sales and
+// POS sales complete immediately; wholesale sales sit PENDING (stock
+// reserved, nothing charged) until the merchant accepts or rejects.
+model Sale {
+  id             String          @id @default(uuid())
+  merchant       MerchantProfile @relation(fields: [merchantId], references: [id])
+  merchantId     String
+  customer       User?           @relation("SaleCustomer", fields: [customerId], references: [id])
+  customerId     String?
+  // Staff who rang up a POS sale, or who decided a pending wholesale order.
+  staff          StaffMember?    @relation(fields: [staffId], references: [id])
+  staffId        String?
+  kind           SaleKind
+  tender         SaleTender
+  status         SaleStatus      @default(COMPLETED)
+  totalMinor     BigInt
+  // Client-supplied, so a network retry of a checkout (cash or wallet) can't
+  // double-charge or double-decrement stock — checked before the wallet
+  // Transaction below even exists.
+  idempotencyKey String
+  transactionId  String?         @unique
+  transaction    Transaction?    @relation(fields: [transactionId], references: [id])
+  printedAt      DateTime?
+  whatsappSentAt DateTime?
+  createdAt      DateTime        @default(now())
+  decidedAt      DateTime?
+
+  items SaleItem[]
+
+  @@unique([merchantId, idempotencyKey])
+  @@index([merchantId, createdAt])
+  @@index([customerId])
+  @@index([status])
+}
+
+model SaleItem {
+  id             String         @id @default(uuid())
+  sale           Sale           @relation(fields: [saleId], references: [id])
+  saleId         String
+  product        Product        @relation(fields: [productId], references: [id])
+  productId      String
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  variantId      String
+  quantity       Int
+  unitPriceMinor BigInt
+
+  @@index([saleId])
+}
+
+enum PaymentRequestStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+// A pull payment: the requester asks a phone number to pay them a set
+// amount (shown as a QR the payer scans, or looked up by request code),
+// approved by the payer's own PIN — the inverse direction of a transfer.
+model PaymentRequest {
+  id            String               @id @default(uuid())
+  requester     User                 @relation("PaymentRequester", fields: [requesterId], references: [id])
+  requesterId   String
+  payerPhone    String
+  amountMinor   BigInt
+  status        PaymentRequestStatus @default(PENDING)
+  transactionId String?              @unique
+  transaction   Transaction?         @relation(fields: [transactionId], references: [id])
+  createdAt     DateTime             @default(now())
+  decidedAt     DateTime?
+
+  @@index([requesterId, status])
+  @@index([payerPhone, status])
 }
 
 // ---------------------------------------------------------------------------
