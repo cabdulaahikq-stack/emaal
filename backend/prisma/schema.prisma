@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  // A single seeded system account whose wallet is the double-entry
+  // counterparty for deposits/withdrawals (i.e. the "float" — cash that has
+  // physically moved in/out of the platform through an external rail).
+  SYSTEM
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  fullName     String
+  phone        String     @unique
+  passwordHash String
+  pinHash      String
+  pinFailCount Int        @default(0)
+  pinLockedUntil DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  wallet       Wallet?
+  approvalsDecided ApprovalRequest[] @relation("ApprovalDecidedBy")
+  auditLogs    AuditLog[]
+
+  @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+// Wallet + ledger
+// ---------------------------------------------------------------------------
+
+enum WalletStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+model Wallet {
+  id            String       @id @default(uuid())
+  user          User         @relation(fields: [userId], references: [id])
+  userId        String       @unique
+  status        WalletStatus @default(ACTIVE)
+  // Cached balance in minor units (cents). The source of truth is the sum of
+  // posted LedgerEntry.amountMinor for this wallet, recomputed inside every
+  // mutating transaction — this column is a read-optimization, never written
+  // to outside walletService.
+  balanceMinor  BigInt       @default(0)
+  // Reserved out of balanceMinor by a WITHDRAWAL/TRANSFER sitting in the
+  // manual approval queue, so the same funds can't be spent twice while a
+  // decision is pending. Spendable balance is always balanceMinor - heldMinor.
+  heldMinor     BigInt       @default(0)
+  currency      String       @default("USD")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([status])
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  HELD_FOR_APPROVAL
+  COMPLETED
+  REJECTED
+  FAILED
+  REVERSED
+}
+
+// A Transaction is the customer/partner-facing unit of work. Each completed
+// transaction is backed by exactly two balancing LedgerEntry rows (double-entry):
+// one debit and one matching credit, so the ledger always nets to zero and a
+// wallet's balance is independently re-derivable by summing its entries.
+model Transaction {
+  id             String             @id @default(uuid())
+  type           TransactionType
+  status         TransactionStatus  @default(PENDING)
+  amountMinor    BigInt
+  currency       String             @default("USD")
+  // Client-supplied idempotency key, scoped per source (customer app or partner API key).
+  idempotencyKey String
+  idempotencyScope String
+  sourceWalletId String?
+  destWalletId   String?
+  partnerId      String?
+  partner        ApiPartner?        @relation(fields: [partnerId], references: [id])
+  failureReason  String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  ledgerEntries  LedgerEntry[]
+  approvalRequest ApprovalRequest?
+  webhookDeliveries WebhookDelivery[]
+
+  @@unique([idempotencyScope, idempotencyKey])
+  @@index([status])
+  @@index([sourceWalletId])
+  @@index([destWalletId])
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+model LedgerEntry {
+  id            String          @id @default(uuid())
+  wallet        Wallet          @relation(fields: [walletId], references: [id])
+  walletId      String
+  transaction   Transaction     @relation(fields: [transactionId], references: [id])
+  transactionId String
+  direction     LedgerDirection
+  // Always stored positive; direction determines the sign applied to balance.
+  amountMinor   BigInt
+  balanceAfterMinor BigInt
+  createdAt     DateTime        @default(now())
+
+  @@index([walletId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Manual approval queue (large/risky transactions)
+// ---------------------------------------------------------------------------
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ApprovalRequest {
+  id            String            @id @default(uuid())
+  transaction   Transaction       @relation(fields: [transactionId], references: [id])
+  transactionId String            @unique
+  reason        String
+  decision      ApprovalDecision  @default(PENDING)
+  decidedBy     User?             @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
+  decidedById   String?
+  decidedAt     DateTime?
+  notes         String?
+  createdAt     DateTime          @default(now())
+
+  @@index([decision])
+}
+
+// ---------------------------------------------------------------------------
+// Third-party API partners
+// ---------------------------------------------------------------------------
+
+enum PartnerStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+model ApiPartner {
+  id          String        @id @default(uuid())
+  name        String
+  status      PartnerStatus @default(ACTIVE)
+  webhookUrl  String?
+  webhookSecret String?
+  rateLimitPerMinute Int    @default(120)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  apiKeys     ApiKey[]
+  transactions Transaction[]
+  requestLogs ApiRequestLog[]
+
+  @@index([status])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  partner     ApiPartner @relation(fields: [partnerId], references: [id])
+  partnerId   String
+  // Shown once at creation; only the hash is persisted.
+  keyPrefix   String
+  keyHash     String
+  scopes      String[]
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([keyPrefix])
+  @@index([partnerId])
+}
+
+model ApiRequestLog {
+  id          String     @id @default(uuid())
+  partner     ApiPartner @relation(fields: [partnerId], references: [id])
+  partnerId   String
+  method      String
+  path        String
+  statusCode  Int
+  ipAddress   String?
+  createdAt   DateTime   @default(now())
+
+  @@index([partnerId, createdAt])
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+model WebhookDelivery {
+  id            String                 @id @default(uuid())
+  transaction   Transaction            @relation(fields: [transactionId], references: [id])
+  transactionId String
+  partnerId     String
+  url           String
+  status        WebhookDeliveryStatus  @default(PENDING)
+  attempts      Int                    @default(0)
+  lastError     String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actor      User?    @relation(fields: [actorId], references: [id])
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([actorId, createdAt])
+}
