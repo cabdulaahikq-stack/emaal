@@ -108,3 +108,17 @@ Express app is exposed as a single serverless function
 rewrites every path to it. Required production env vars: `DATABASE_URL`
 (pooler string above), `JWT_SECRET`, `NODE_ENV=production`,
 `APPROVAL_THRESHOLD_USD`.
+
+### Mobile web app: Vercel
+
+The mobile app's web build is deployed and live at
+**https://emaal-wallet-mobile.vercel.app**, wired to the backend above via
+`EXPO_PUBLIC_API_URL`. It's a git-linked Vercel project (`emaal-wallet-mobile`)
+tracking this repo's `main` branch with root directory `mobile` — every push
+to `main` redeploys automatically. Build command:
+`npx expo export -p web --output-dir dist`, output directory `dist`.
+
+On web, the app renders immediately with the system-font fallback instead of
+blocking on the custom Caprasimo/Figtree webfonts (see the `Platform.OS`
+check in `src/RootApp.tsx`) — native builds still gate on font load as
+before.
