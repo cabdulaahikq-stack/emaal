@@ -49,7 +49,7 @@ export function Button({
 
 // --- Card -------------------------------------------------------------------
 
-export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
+export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle | (ViewStyle | false | null | undefined)[] }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
 

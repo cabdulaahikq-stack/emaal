@@ -34,6 +34,7 @@ interface AuthState {
   status: "loading" | "signedOut" | "locked" | "unlocked";
   user: User | null;
   signup: (input: { fullName: string; phone: string; password: string; pin: string }) => Promise<void>;
+  merchantSignup: (input: { fullName: string; phone: string; password: string; pin: string; shopName: string }) => Promise<void>;
   login: (phone: string, password: string) => Promise<void>;
   unlock: (pin: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -74,6 +75,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [persistSession],
   );
 
+  const merchantSignup = useCallback<AuthState["merchantSignup"]>(
+    async (input) => {
+      const res = await api.post<{ token: string; user: User }>("/auth/merchant-signup", input);
+      await persistSession(res.token, res.user);
+      setStatus("unlocked");
+    },
+    [persistSession],
+  );
+
   const login = useCallback<AuthState["login"]>(
     async (phone, password) => {
       const res = await api.post<{ token: string; user: User }>("/auth/login", { phone, password });
@@ -96,7 +106,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStatus("signedOut");
   }, []);
 
-  const value = useMemo(() => ({ status, user, signup, login, unlock, logout }), [status, user, signup, login, unlock, logout]);
+  const value = useMemo(
+    () => ({ status, user, signup, merchantSignup, login, unlock, logout }),
+    [status, user, signup, merchantSignup, login, unlock, logout],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

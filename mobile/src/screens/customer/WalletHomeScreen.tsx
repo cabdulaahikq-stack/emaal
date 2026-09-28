@@ -5,7 +5,7 @@ import { getMyWallet } from "../../api/wallet";
 import type { LedgerEntry, Wallet } from "../../api/types";
 import { useStackNav } from "../../nav/TabStackNav";
 import { Card } from "../../components/ui";
-import { IconArrowDownLeft, IconArrowUpRight, IconLogOut, IconPlus } from "../../components/icons";
+import { IconArrowDownLeft, IconArrowUpRight, IconKey, IconLogOut, IconPlus } from "../../components/icons";
 import { colors, fonts, radius, space } from "../../theme/tokens";
 import { formatUsd } from "../../util/format";
 
@@ -59,6 +59,7 @@ export function WalletHomeScreen() {
             <ActionButton icon={<IconPlus color={colors.white} />} label="Deposit" onPress={() => nav.push("Deposit")} />
             <ActionButton icon={<IconArrowUpRight color={colors.white} />} label="Withdraw" onPress={() => nav.push("Withdraw")} />
             <ActionButton icon={<IconArrowDownLeft color={colors.white} />} label="Send" onPress={() => nav.push("Transfer")} />
+            <ActionButton icon={<IconKey color={colors.white} />} label="Requests" onPress={() => nav.push("PaymentRequests")} />
           </View>
 
           <Text style={styles.sectionTitle}>Recent activity</Text>

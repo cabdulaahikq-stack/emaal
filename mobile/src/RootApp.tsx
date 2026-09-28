@@ -14,6 +14,12 @@ import { DepositScreen } from "./screens/customer/DepositScreen";
 import { WithdrawScreen } from "./screens/customer/WithdrawScreen";
 import { TransferScreen } from "./screens/customer/TransferScreen";
 import { TransactionDetailScreen as CustomerTransactionDetailScreen } from "./screens/customer/TransactionDetailScreen";
+import { MarketplaceHomeScreen } from "./screens/customer/MarketplaceHomeScreen";
+import { ProductDetailScreen as CustomerProductDetailScreen } from "./screens/customer/ProductDetailScreen";
+import { MyOrdersScreen } from "./screens/customer/MyOrdersScreen";
+import { PaymentRequestsScreen } from "./screens/customer/PaymentRequestsScreen";
+import { CreatePaymentRequestScreen } from "./screens/customer/CreatePaymentRequestScreen";
+import { PaymentRequestDetailScreen } from "./screens/customer/PaymentRequestDetailScreen";
 
 import { AdminHomeScreen } from "./screens/admin/AdminHomeScreen";
 import { WalletsListScreen } from "./screens/admin/WalletsListScreen";
@@ -23,9 +29,25 @@ import { TransactionDetailScreen as AdminTransactionDetailScreen } from "./scree
 import { PartnersListScreen } from "./screens/admin/PartnersListScreen";
 import { PartnerDetailScreen } from "./screens/admin/PartnerDetailScreen";
 import { ApiDocsScreen } from "./screens/admin/ApiDocsScreen";
-import { IconBook, IconHome, IconKey, IconShield, IconWallet } from "./components/icons";
 
-const CUSTOMER_TABS: TabDef[] = [{ key: "wallet", label: "Wallet", icon: (a) => <IconWallet color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "WalletHome" }];
+import { MerchantHomeScreen } from "./screens/merchant/MerchantHomeScreen";
+import { ProductsListScreen } from "./screens/merchant/ProductsListScreen";
+import { CreateProductScreen } from "./screens/merchant/CreateProductScreen";
+import { ProductDetailScreen as MerchantProductDetailScreen } from "./screens/merchant/ProductDetailScreen";
+import { POSScreen } from "./screens/merchant/POSScreen";
+import { OrdersPendingScreen } from "./screens/merchant/OrdersPendingScreen";
+import { CashRegisterScreen } from "./screens/merchant/CashRegisterScreen";
+import { StaffListScreen } from "./screens/merchant/StaffListScreen";
+import { CreateStaffScreen } from "./screens/merchant/CreateStaffScreen";
+import { StaffDetailScreen } from "./screens/merchant/StaffDetailScreen";
+import { WarehousesScreen } from "./screens/merchant/WarehousesScreen";
+
+import { IconBook, IconHome, IconKey, IconPlus, IconShield, IconWallet } from "./components/icons";
+
+const CUSTOMER_TABS: TabDef[] = [
+  { key: "wallet", label: "Wallet", icon: (a) => <IconWallet color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "WalletHome" },
+  { key: "shop", label: "Shop", icon: (a) => <IconBook color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "MarketplaceHome" },
+];
 
 const CUSTOMER_SCREENS = {
   WalletHome: WalletHomeScreen,
@@ -33,6 +55,12 @@ const CUSTOMER_SCREENS = {
   Withdraw: WithdrawScreen,
   Transfer: TransferScreen,
   TransactionDetail: CustomerTransactionDetailScreen,
+  MarketplaceHome: MarketplaceHomeScreen,
+  ProductDetail: CustomerProductDetailScreen,
+  MyOrders: MyOrdersScreen,
+  PaymentRequests: PaymentRequestsScreen,
+  CreatePaymentRequest: CreatePaymentRequestScreen,
+  PaymentRequestDetail: PaymentRequestDetailScreen,
 };
 
 const ADMIN_TABS: TabDef[] = [
@@ -53,6 +81,33 @@ const ADMIN_SCREENS = {
   PartnerDetail: PartnerDetailScreen,
   ApiDocs: ApiDocsScreen,
 };
+
+const MERCHANT_SCREENS = {
+  MerchantHome: MerchantHomeScreen,
+  ProductsList: ProductsListScreen,
+  CreateProduct: CreateProductScreen,
+  ProductDetail: MerchantProductDetailScreen,
+  POS: POSScreen,
+  OrdersPending: OrdersPendingScreen,
+  CashRegister: CashRegisterScreen,
+  StaffList: StaffListScreen,
+  CreateStaff: CreateStaffScreen,
+  StaffDetail: StaffDetailScreen,
+  Warehouses: WarehousesScreen,
+};
+
+// A staff member gets the same tabs minus Staff management, which stays
+// MERCHANT-only both here and on the backend (requireRole("MERCHANT")).
+const MERCHANT_TABS: TabDef[] = [
+  { key: "home", label: "Home", icon: (a) => <IconHome color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "MerchantHome" },
+  { key: "products", label: "Products", icon: (a) => <IconBook color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "ProductsList" },
+  { key: "sell", label: "Sell", icon: (a) => <IconPlus color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "POS" },
+  { key: "orders", label: "Orders", icon: (a) => <IconShield color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "OrdersPending" },
+  { key: "register", label: "Register", icon: (a) => <IconWallet color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "CashRegister" },
+  { key: "staff", label: "Staff", icon: (a) => <IconKey color={a ? colors.accent700 : colors.neutral600} />, rootRoute: "StaffList" },
+];
+
+const STAFF_TABS: TabDef[] = MERCHANT_TABS.filter((t) => t.key !== "staff");
 
 function Gate() {
   const { status, user } = useAuth();
@@ -80,6 +135,12 @@ function Gate() {
 
   if (user?.role === "ADMIN") {
     return <TabStackNav tabs={ADMIN_TABS} screens={ADMIN_SCREENS} />;
+  }
+  if (user?.role === "MERCHANT") {
+    return <TabStackNav tabs={MERCHANT_TABS} screens={MERCHANT_SCREENS} />;
+  }
+  if (user?.role === "STAFF") {
+    return <TabStackNav tabs={STAFF_TABS} screens={MERCHANT_SCREENS} />;
   }
   return <TabStackNav tabs={CUSTOMER_TABS} screens={CUSTOMER_SCREENS} />;
 }
